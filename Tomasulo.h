@@ -446,5 +446,4 @@ void commit() {
 //    std::cout<<std::endl;
 }
 
-
 #endif //RISIC_V_TOMASULO_H
