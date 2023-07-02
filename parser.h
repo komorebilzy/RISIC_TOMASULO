@@ -4,7 +4,6 @@
 #include <string>
 #include <iostream>
 
-
 unsigned int mem[1000000], PC = 0, reg[32];
 
 unsigned int get_num(const unsigned int &order, const int &l, const int &r) {
@@ -95,24 +94,22 @@ unsigned int getImm(const unsigned int &order) {
     unsigned int imm;
     if (type == I ) {
         imm=get_num(order, 31, 20);
-        if (imm >> 11) {
+        if (order>>31) {
             for (int i = 31; i >= 12; --i) {
                 imm += (1 << i);
             }
         }
         return imm;
     } else if (type == S) {
-        return (get_num(order, 31, 25) << 5) + get_num(order, 11, 7);
+        return (get_num(order, 30, 25) << 5) + get_num(order, 11, 7);
     } else if (type == B) {
-        imm= (get_num(order, 11, 8) << 1) + (get_num(order, 30, 25) << 5) + (get_num(order, 7, 7) << 11) +
-               (get_num(order, 31, 31) << 12);
-        if (imm >> 12) {for (int i = 31; i >= 13; --i) imm += (1 << i);}
+        imm= (get_num(order, 11, 8) << 1) + (get_num(order, 30, 25) << 5) + (get_num(order, 7, 7) << 11);
+        if (order>>31) {for (int i = 31; i >= 12; --i) imm += (1 << i);}
         return imm;
     } else if (type == U) { return get_num(order, 31, 12) << 12; }
     else if (type == J) {
-        imm= (get_num(order, 30, 21) << 1) + (get_num(order, 20, 20) << 11) + (get_num(order, 19, 12) << 12) +
-               (get_num(order, 31, 31) << 20);
-        if (imm >> 19) for (int i = 31; i >= 20; --i) {imm += (1 >> i);}
+        imm= (get_num(order, 30, 21) << 1) + (get_num(order, 20, 20) << 11) + (get_num(order, 19, 12) << 12) ;
+        if (imm >> 19) for (int i = 31; i >= 20; --i) {imm += (1 << i);}
         return imm;
     }
 }
@@ -175,18 +172,19 @@ void FormatB(unsigned int order,unsigned int rs1,unsigned int rs2,unsigned int &
     unsigned int imm= getImm(order);
     unsigned int func = getFunct3(order);
     if (func == beq) {
-        if (rs1 == rs2) pc += imm;
+        if (rs1 == rs2) pc += imm -4;
     } else if (func == bne) {
-        if (rs1 != rs2) pc += imm;
+        if (rs1 != rs2) pc += imm -4;
     } else if (func == blt) {
-        if ((int) rs1 < (int) rs2) pc += imm;
+        if ((int) rs1 < (int) rs2) pc += imm -4;
     } else if (func == bge) {
-        if ((int) rs1 >=(int)rs2) pc+=imm;
+        if ((int) rs1 >=(int)rs2) pc+=imm -4;
     } else if (func == bltu) {
-        if(rs1<rs2) pc+=imm;
+        if(rs1<rs2) pc+=imm -4;
     } else if (func == bgeu) {
-        if(rs1>=rs2) pc+=imm;
+        if(rs1>=rs2) pc+=imm -4;
     }
+    pc+=4;
 
 }
 
@@ -211,8 +209,8 @@ void FormatJ(unsigned int order, unsigned int &pc, unsigned int &result = reg[1]
 
 void FormatS(unsigned int order,unsigned int rs1,unsigned int rs2, unsigned int &address,unsigned int &result) {
     unsigned int imm= getImm(order);
-    if (imm >> 6) {
-        for (int i = 31; i >= 7; --i) {
+    if (order>>31) {
+        for (int i = 31; i >= 11; --i) {
             imm += (1 << i);
         }
     }
@@ -222,10 +220,12 @@ void FormatS(unsigned int order,unsigned int rs1,unsigned int rs2, unsigned int 
 
 
 void Store(unsigned int order, unsigned int address,unsigned int result){
+//    std::cout<<"storing "<<address<<" "<<result;
     unsigned int func = getFunct3(order);
     if (func == sb) {
         mem[address] = result & 255u;
     } else if (func == sh) {
+        result= result & ((1<<17)-1);
         mem[address + 1] = (result >> 8) & 255u;
         mem[address] =result & 255u;
     } else if (func == sw) {
@@ -237,7 +237,7 @@ void Store(unsigned int order, unsigned int address,unsigned int result){
 }
 
 void getAddress(unsigned int order,unsigned int rs1, unsigned int &address){
-    address=reg[rs1]+getImm(order);
+    address=rs1+getImm(order);
 }
 
 void Load(unsigned int order,unsigned int address, unsigned int &result) {
@@ -249,35 +249,29 @@ void Load(unsigned int order,unsigned int address, unsigned int &result) {
         }
         result = tmp;
     } else if (func == lh) {
-        unsigned int tmp = (mem[address] << 4) + mem[address + 1];
+        unsigned int tmp = mem[address] + (mem[address + 1]<<8);
         if (tmp >> 15) {
             for (int i = 31; i >= 16; --i) tmp += (1 << i);
         }
         result = tmp;
     } else if (func == lw) {
-        unsigned int tmp = (mem[address] << 12) + (mem[address + 1] << 8) + (mem[address + 2] << 4) + mem[address + 3];
+        unsigned int tmp = (mem[address] ) | (mem[address + 1] << 8) | (mem[address + 2] << 16) | (mem[address + 3] <<24);
         result = tmp;
     } else if (func == lbu) {
-        unsigned int tmp = mem[address];
-        if (tmp >> 7) {
-            for (int i = 31; i >= 8; --i) tmp += (0 << i);
-        }
+        unsigned int tmp = mem[address]&0b11111111;
         result = tmp;
     } else if (func == lhu) {
-        unsigned int tmp = (mem[address] << 4) + mem[address + 1];
-        if (tmp >> 15) {
-            for (int i = 31; i >= 16; --i) tmp += (1 << i);
-        }
+        unsigned int tmp = (mem[address+1] << 8) + mem[address ];
         result = tmp;
     }
 }
 
 unsigned int des_to_int(std::string num) { //地址
-    int des = 0;
+    unsigned int des = 0;
     int get[] = {28, 24, 20, 16, 12, 8, 4, 0};
     for (int i = 0; i < 8; ++i) {
-        if ('0' <= num[i] <= '9')des += ((num[i]-'0') * (1 << get[i]));
-        else des += ((num[i] - 'A') * (1 << get[i]));
+        if ('0' <= num[i] && num[i]<= '9')des += ((num[i]-'0') * (1 << get[i]));
+        else des += ((num[i] - 'A'+10) * (1 << get[i]));
     }
     return des;
 }
@@ -286,8 +280,8 @@ void set_memory(char first, unsigned int des) {  //读入内存 改变mem[]
     int get[] = {4, 0, 4, 0, 4, 0, 4, 0};
     int num;
     for (int i = 0; i < 8; ++i) {
-        if ('0' <= first <= '9') num = first - '0';
-        else num = first - 'A';
+        if ('0' <= first && first<= '9') num = first - '0';
+        else num = first - 'A' + 10;
         mem[des + i / 2] += (num * (1 << get[i]));
         if (i <= 6) std::cin >> first;
     }

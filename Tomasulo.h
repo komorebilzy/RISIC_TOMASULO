@@ -3,6 +3,9 @@
 
 #include "parser.h"
 
+int sum = 0;
+
+bool flag = false;
 enum state {
     waiting = 1,
     finished = 2,
@@ -56,8 +59,12 @@ public:
         return (siz + topper) % len;
     }
 
+    bool empty() const {
+        return siz == 0;
+    }
+
     void reset() {
-        for (auto & i : rob) i.ready = false;
+        for (auto &i: rob) i.ready = false;
         siz = 0;
         topper = 0;
     }
@@ -76,7 +83,6 @@ public:
                 Status[rob[rear].des].reorder = rob[rear].entry;
                 Status[rob[rear].des].busy = true;
             }
-
         }
     }
 
@@ -84,9 +90,7 @@ public:
         int rear = CDB.entry;
         rob[rear].ready = true;
         rob[rear].value = CDB.result;
-        if (getOpcode(rob[rear].instruction) == load || getOpcode(rob[rear].instruction) == store)
-            rob[rear].address = CDB.pc;
-        else rob[rear].pc = CDB.pc;
+        rob[rear].pc = CDB.pc;
 //        unsigned int opcode= getOpcode(rob[rear].instruction);
 //        if(rob[rear].type==B || opcode==jal || opcode==jalr)
     }
@@ -98,7 +102,7 @@ public:
     static const int len = 32;
     struct ReservationStation {
         bool busy;
-        int type, state = empty;
+        int type, state;
         unsigned int op;
         unsigned int Vj, Vk;
         int Qj = -1, Qk = -1;
@@ -152,6 +156,7 @@ public:
     void execute() {
         int i;
         for (i = 0; i < len; ++i) { if (rs[i].state == waiting && rs[i].Qj == -1 && rs[i].Qk == -1) break; }
+        if (i == len) return;
         rs[i].state = finished;
         if (rs[i].type == B) FormatB(rs[i].op, rs[i].Vj, rs[i].Vk, rs[i].pc);
         else if (rs[i].type == U) FormatU(rs[i].op, rs[i].result, rs[i].pc);
@@ -192,10 +197,11 @@ public:
     struct LoadBuffer {
         bool busy;
         int type, state;
-        unsigned int Vj, Vk, Qj = -1, Qk = -1, op;
+        unsigned int Vj, Vk, op;
+        int Qj = -1, Qk = -1;
         int entry;
         unsigned int address, result;
-        int clock = 3;
+        int clock = 2;
     } ls[len];
 
     bool available() {
@@ -231,7 +237,7 @@ public:
         ls[rear].type = getType(order);
         ls[rear].op = order;
         ls[rear].state = counting;
-        ls[rear].clock = 3;
+        ls[rear].clock = 2;
         ls[rear].Qj = ls[rear].Qk = -1;
         unsigned int rs1 = getRs1(order);
         if (Status[rs1].busy) {
@@ -246,36 +252,28 @@ public:
     }
 
     void execute() {
-        for (int i = topper;; i = (i + 1) % len) {
-            //检查load操作前面的ROB中是否有与当前store相同的des
-            if (ls[i].state == counting && ls[i].Qk == -1 && ls[i].Qj == -1) {
-                if (ls[i].clock == 0) {
-                    ls[i].state = finished;
-                    if (ls[i].type == S) FormatS(ls[i].op, ls[i].Vj, ls[i].Vk, ls[i].address, ls[i].result);
-                    else if (ls[i].type == I) getAddress(ls[i].op, ls[i].Vj, ls[i].address);
-                } else ls[i].clock--;
-            }
-            if (i == (topper + len - 1) % len) break;
+        int i = topper;
+        //检查load操作前面的ROB中是否有与当前store相同的des
+        if (ls[i].state == counting && ls[i].busy && ls[i].Qk == -1 && ls[i].Qj == -1) {
+            if (ls[i].clock == 0) {
+                ls[i].state = finished;
+                if (ls[i].type == S) {
+                    FormatS(ls[i].op, ls[i].Vj, ls[i].Vk, ls[i].address, ls[i].result);
+                    ROB.rob[ls[i].entry].value = ls[i].result;
+                } else if (ls[i].type == I) getAddress(ls[i].op, ls[i].Vj, ls[i].address);
+                ROB.rob[ls[i].entry].address = ls[i].address;
+                ROB.rob[ls[i].entry].ready = true;
+                ls[i].state = counting;
+                ls[i].busy = false;
+                pop();
+            } else ls[i].clock--;
         }
     }
 
-    bool write() {
-        for (int i = topper;; i = (i + 1) % len) {
-            if (ls[i].state == finished) {
-                if (ls[i].type == S) ls[i].result = 0;
-                CDB = (CommonDataBase) {ls[i].entry, ls[i].result, ls[i].address};
-                ls[i].state = counting;
-                ls[i].busy= false;
-                return true;
-            }
-            if (i == (topper + len - 1) % len) break;
-        }
-        return false;
-    }
 
     void broadcast() {
         for (int i = topper;; i = (i + 1) % len) {
-            if (ls[i].state == counting) {
+            if (ls[i].state == counting && ls[i].busy) {
                 if (ls[i].Qj == CDB.entry) ls[i].Qj = -1, ls[i].Vj = CDB.result;
                 else if (ls[i].Qk == CDB.entry) ls[i].Qk = -1, ls[i].Vk = CDB.result;
             }
@@ -287,27 +285,40 @@ public:
 
 void reset() {
     PC = 0;
+    for (auto &Statu: Status) Statu.busy = false;
     ROB.reset();
     RS.reset();
     LS.reset();
 }
 
 void issue() {
+
+//    std::cout << "PC=" << PC << std::endl;
+    if (flag) {  //阻断发射
+        if (!ROB.empty()) return;
+        else flag = false;
+    }
+//    sum++;
     unsigned int order = 0;
     int get[] = {0, 8, 16, 24};
     for (int i = 0; i < 4; ++i) {
-        order += mem[PC + i] * (1 << get[i]);
+        order += mem[PC + i] << get[i];
     }
-    unsigned int type = getOpcode(order);
-    if (type == load || type == store) {
+    unsigned int opcode = getOpcode(order);
+    if (opcode == load || opcode == store) {
         if (!(LS.available() && ROB.available())) return;
         LS.insert(ROB.getEmpty(), order);
         ROB.insert(order, PC);
     } else {
+        if (getType(order) == B || opcode == jalr) flag = true;
         if (!(RS.available() && ROB.available())) return;
         RS.insert(ROB.getEmpty(), order, PC);
         ROB.insert(order, PC);
     }
+    if (getType(order) == J) PC += getImm(order);
+    else if (!flag) PC += 4;
+//    std::cout << order << std::endl;
+    //跳转指令需要stall 直到ROB为空（所有commit操作都已经完成） 才能继续进行
 }
 
 void execute() {
@@ -317,7 +328,7 @@ void execute() {
 
 void writeBack() {
     if (!RS.write()) {
-        if (!LS.write()) return;
+        return;
     }
     RS.broadcast();
     LS.broadcast();
@@ -327,37 +338,66 @@ void writeBack() {
 void commit() {
     ReorderBuffer order = ROB.top();
     if (!order.ready) return;
+    ROB.pop();
+//    ++sum;
+//    std::cout << order.instruction << " ";
     if (order.instruction == 0x0ff00513u) {
+//        std::cout << "reg: ";
+//        for (int i = 0; i <= 31; ++i) std::cout << reg[i] << " ";
+//        std::cout << std::endl;
         std::cout << (reg[10] & 255u) << std::endl;
         exit(0);
     }
     if (order.type == R || order.type == U) {
         reg[order.des] = order.value;
-        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
+        //for debug
+//        if (getOpcode(order.instruction) == R) puts("R");
+//        else puts("U");
     } else if (order.type == I) {
         if (getOpcode(order.instruction) == jalr) {
-            reset();
             PC = order.pc;
-        }
-        else if (getOpcode(order.instruction) == load) {
+            //
+//            puts("jalr");
+        } else if (getOpcode(order.instruction) == load) {
             Load(order.instruction, order.address, order.value);
+//            puts("load");
         }
+//        } else puts("I");
         reg[order.des] = order.value; //包括load和普通短立即数操作
-        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
+//        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
     } else if (order.type == S) {
         Store(order.instruction, order.address, order.value);
+//        puts("S");
     } else if (order.type == B) {
-        reset();
         PC = order.pc;
+//        puts("B");
     } else if (order.type == J) {
-        reset();
         reg[order.des] = order.value;
-        PC = order.pc;
+//        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
+//        puts("j");
     }
-    if (order.type != J && order.type != B && getOpcode(order.instruction) != jalr) {
-        PC += 4;
+    if (order.type != S && order.type != B) {
+        if (Status[order.des].reorder == order.entry) {
+            Status[order.des].busy = false;
+        }
+        for (auto &r: RS.rs) {
+            if (r.state == waiting) {  //RS通过匹配entry更新
+                if (r.Qj == order.entry) r.Qj = -1, r.Vj = reg[order.des];
+                else if (r.Qk == order.entry) r.Qk = -1, r.Vk = reg[order.des];
+            }
+        }
+        for (auto &r: LS.ls) {
+            if (r.state == counting && r.busy) {  //RS通过匹配entry更新
+                if (r.Qj == order.entry) r.Qj = -1, r.Vj = reg[order.des];
+                else if (r.Qk == order.entry) r.Qk = -1, r.Vk = reg[order.des];
+            }
+        }
     }
-    ROB.pop();
+    reg[0] = 0;
+//    std::cout<<"reg: ";
+//    for(int i=0;i<=31;++i) std::cout<<reg[i]<<" ";
+//    std::cout<<std::endl;
+//    std::cout<<mem[5844]<<std::endl;
 }
 
 

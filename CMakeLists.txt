@@ -3,4 +3,4 @@ project(RISIC_V)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(RISIC_V main.cpp)
+add_executable(RISIC_V Right.cpp)
