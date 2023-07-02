@@ -13,6 +13,36 @@ enum state {
     counting = 4,
 };
 
+enum counter {
+    stronglyNotToken = 0,
+    weaklyNotToken = 1,
+    weaklyToken = 2,
+    stronglyToken = 3,
+};
+
+class Predict {
+private:
+    const unsigned int init = 337;
+    struct branch_target_buffer {
+        int sc = weaklyNotToken;
+    } BTB[4000];
+
+    int getHashed(const unsigned &pc) { return (1ll * pc * init) % 4000; }
+
+public:
+    void changeState(bool result, const unsigned &pc) {
+        int id = getHashed(pc);
+        if (result && BTB[id].sc != stronglyToken) BTB[id].sc++;
+        else if (!result && BTB[id].sc != stronglyNotToken) BTB[id].sc--;
+    }
+
+    bool jump(const unsigned &pc) {
+        int id = getHashed(pc);
+        if (BTB[id].sc == weaklyToken || BTB[id].sc == stronglyToken) return true;
+        else return false;
+    }
+} predicter;
+
 class RegisterStatus {
 public:
     bool busy = false;
@@ -31,7 +61,7 @@ public:
     bool ready;
     unsigned int instruction, des, value, address;  //des是寄存器编号 ,address是对应内存地址
     int type;
-    unsigned int pc;  //pc对应地址
+    unsigned int pc, pc_init;  //pc对应地址
 };
 
 
@@ -76,6 +106,7 @@ public:
         rob[rear].instruction = order;
         rob[rear].type = getType(order);
         rob[rear].pc = pc_now;
+        if (rob[rear].type == B) rob[rear].pc_init = pc_now;
         rob[rear].ready = false;
         if (rob[rear].type != S && rob[rear].type != B) {
             rob[rear].des = getRd(order);
@@ -127,6 +158,9 @@ public:
     void reset() {
         for (auto &r: rs) {
             r.busy = false;
+            r.Qj = -1;
+            r.Qk = -1;
+            r.state=empty;
         }
     }
 
@@ -226,8 +260,12 @@ public:
     void reset() {
         for (int i = topper;; i = (i + 1) % len) {
             ls[i].busy = false;
+            ls[i].Qj = -1;
+            ls[i].Qk = -1;
+            ls[i].state=empty;
             if (i == (topper + len - 1) % len) break;
         }
+        topper = 0;
     }
 
     void insert(int entry, unsigned int order) {
@@ -298,7 +336,6 @@ void issue() {
         if (!ROB.empty()) return;
         else flag = false;
     }
-//    sum++;
     unsigned int order = 0;
     int get[] = {0, 8, 16, 24};
     for (int i = 0; i < 4; ++i) {
@@ -310,14 +347,19 @@ void issue() {
         LS.insert(ROB.getEmpty(), order);
         ROB.insert(order, PC);
     } else {
-        if (getType(order) == B || opcode == jalr) flag = true;
         if (!(RS.available() && ROB.available())) return;
+        if (opcode == jalr) flag = true;
         RS.insert(ROB.getEmpty(), order, PC);
         ROB.insert(order, PC);
     }
     if (getType(order) == J) PC += getImm(order);
-    else if (!flag) PC += 4;
-//    std::cout << order << std::endl;
+    else if (getType(order) == B) {
+        if (predicter.jump(PC)) PC += getImm(order);
+        else PC += 4;
+    } else if (!flag) PC += 4;
+//    ++sum;
+//    std::c
+//    out << order << std::endl;
     //跳转指令需要stall 直到ROB为空（所有commit操作都已经完成） 才能继续进行
 }
 
@@ -339,12 +381,9 @@ void commit() {
     ReorderBuffer order = ROB.top();
     if (!order.ready) return;
     ROB.pop();
-//    ++sum;
+    ++sum;
 //    std::cout << order.instruction << " ";
     if (order.instruction == 0x0ff00513u) {
-//        std::cout << "reg: ";
-//        for (int i = 0; i <= 31; ++i) std::cout << reg[i] << " ";
-//        std::cout << std::endl;
         std::cout << (reg[10] & 255u) << std::endl;
         exit(0);
     }
@@ -361,15 +400,23 @@ void commit() {
         } else if (getOpcode(order.instruction) == load) {
             Load(order.instruction, order.address, order.value);
 //            puts("load");
-        }
 //        } else puts("I");
+        }
         reg[order.des] = order.value; //包括load和普通短立即数操作
 //        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
     } else if (order.type == S) {
         Store(order.instruction, order.address, order.value);
 //        puts("S");
     } else if (order.type == B) {
-        PC = order.pc;
+        unsigned int pc_predict;
+        if (predicter.jump(order.pc_init))
+            pc_predict = order.pc_init + getImm(order.instruction);
+        else pc_predict = order.pc_init + 4;
+        if (order.pc != pc_predict) {
+            reset();
+            PC = order.pc;
+            predicter.changeState(false, order.pc_init);
+        } else predicter.changeState(true, order.pc_init);
 //        puts("B");
     } else if (order.type == J) {
         reg[order.des] = order.value;
@@ -397,7 +444,6 @@ void commit() {
 //    std::cout<<"reg: ";
 //    for(int i=0;i<=31;++i) std::cout<<reg[i]<<" ";
 //    std::cout<<std::endl;
-//    std::cout<<mem[5844]<<std::endl;
 }
 
 
