@@ -418,7 +418,6 @@ void commit() {
             predicter.changeState(false, order.pc_init);
         } else predicter.changeState(true, order.pc_init);
 //        puts("B");
-
     } else if (order.type == J) {
         reg[order.des] = order.value;
 //        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
