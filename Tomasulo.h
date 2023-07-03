@@ -122,8 +122,6 @@ public:
         rob[rear].ready = true;
         rob[rear].value = CDB.result;
         rob[rear].pc = CDB.pc;
-//        unsigned int opcode= getOpcode(rob[rear].instruction);
-//        if(rob[rear].type==B || opcode==jal || opcode==jalr)
     }
 } ROB;
 
@@ -330,7 +328,6 @@ void reset() {
 }
 
 void issue() {
-//    std::cout << "PC=" << PC << std::endl;
     if (flag) {  //阻断发射
         if (!ROB.empty()) return;
         else flag = false;
@@ -379,31 +376,22 @@ void commit() {
     ReorderBuffer order = ROB.top();
     if (!order.ready) return;
     ROB.pop();
-//    ++sum;
-//    std::cout << order.instruction << std::endl;
     if (order.instruction == 0x0ff00513u) {
         std::cout << (reg[10] & 255u) << std::endl;
         exit(0);
     }
     if (order.type == R || order.type == U) {
         reg[order.des] = order.value;
-        //for debug
-//        if (getOpcode(order.instruction) == R) puts("R");
-//        else puts("U");
     } else if (order.type == I) {
         if (getOpcode(order.instruction) == jalr) {
             PC = order.pc;
-//            puts("jalr");
         } else if (getOpcode(order.instruction) == load) {
             Load(order.instruction, order.address, order.value);
-//            puts("load");
-//        } else puts("I");
         }
         reg[order.des] = order.value; //包括load和普通短立即数操作
     } else if (order.type == S) {
         Store(order.instruction, order.address, order.value);
         PC+=4;
-//        puts("S");
     } else if (order.type == B) {
         unsigned int pc_predict;
         if (predicter.jump(order.pc_init))
@@ -414,10 +402,8 @@ void commit() {
             PC = order.pc;
             predicter.changeState(false, order.pc_init);
         } else predicter.changeState(true, order.pc_init);
-//        puts("B");
     } else if (order.type == J) {
         reg[order.des] = order.value;
-//        puts("J");
     }
     if (order.type != S && order.type != B) {
         if (Status[order.des].reorder == order.entry) {
