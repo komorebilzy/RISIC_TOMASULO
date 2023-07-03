@@ -160,7 +160,7 @@ public:
             r.busy = false;
             r.Qj = -1;
             r.Qk = -1;
-            r.state=empty;
+            r.state = empty;
         }
     }
 
@@ -201,7 +201,7 @@ public:
 
     bool write() {
         for (auto &r: rs) {
-            if (r.state == finished) {
+            if (r.state == finished && r.busy) {
                 r.state = empty;
                 r.busy = false;
                 CDB.entry = r.entry;
@@ -262,7 +262,7 @@ public:
             ls[i].busy = false;
             ls[i].Qj = -1;
             ls[i].Qk = -1;
-            ls[i].state=empty;
+            ls[i].state = empty;
             if (i == (topper + len - 1) % len) break;
         }
         topper = 0;
@@ -323,19 +323,19 @@ public:
 
 void reset() {
     PC = 0;
-    for (auto &Statu: Status) Statu.busy = false;
+    for (auto &Statu: Status) Statu.busy = false, Statu.reorder = -1;
     ROB.reset();
     RS.reset();
     LS.reset();
 }
 
 void issue() {
-
 //    std::cout << "PC=" << PC << std::endl;
     if (flag) {  //阻断发射
         if (!ROB.empty()) return;
         else flag = false;
     }
+    sum++;
     unsigned int order = 0;
     int get[] = {0, 8, 16, 24};
     for (int i = 0; i < 4; ++i) {
@@ -344,6 +344,7 @@ void issue() {
     unsigned int opcode = getOpcode(order);
     if (opcode == load || opcode == store) {
         if (!(LS.available() && ROB.available())) return;
+        if (opcode == store) flag = true;
         LS.insert(ROB.getEmpty(), order);
         ROB.insert(order, PC);
     } else {
@@ -357,9 +358,6 @@ void issue() {
         if (predicter.jump(PC)) PC += getImm(order);
         else PC += 4;
     } else if (!flag) PC += 4;
-//    ++sum;
-//    std::c
-//    out << order << std::endl;
     //跳转指令需要stall 直到ROB为空（所有commit操作都已经完成） 才能继续进行
 }
 
@@ -381,8 +379,8 @@ void commit() {
     ReorderBuffer order = ROB.top();
     if (!order.ready) return;
     ROB.pop();
-    ++sum;
-//    std::cout << order.instruction << " ";
+//    ++sum;
+//    std::cout << order.instruction << std::endl;
     if (order.instruction == 0x0ff00513u) {
         std::cout << (reg[10] & 255u) << std::endl;
         exit(0);
@@ -395,7 +393,6 @@ void commit() {
     } else if (order.type == I) {
         if (getOpcode(order.instruction) == jalr) {
             PC = order.pc;
-            //
 //            puts("jalr");
         } else if (getOpcode(order.instruction) == load) {
             Load(order.instruction, order.address, order.value);
@@ -403,9 +400,9 @@ void commit() {
 //        } else puts("I");
         }
         reg[order.des] = order.value; //包括load和普通短立即数操作
-//        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
     } else if (order.type == S) {
         Store(order.instruction, order.address, order.value);
+        PC+=4;
 //        puts("S");
     } else if (order.type == B) {
         unsigned int pc_predict;
@@ -420,8 +417,7 @@ void commit() {
 //        puts("B");
     } else if (order.type == J) {
         reg[order.des] = order.value;
-//        if (Status[order.des].reorder == order.entry) Status[order.des].busy = false;
-//        puts("j");
+//        puts("J");
     }
     if (order.type != S && order.type != B) {
         if (Status[order.des].reorder == order.entry) {
@@ -441,9 +437,6 @@ void commit() {
         }
     }
     reg[0] = 0;
-//    std::cout<<"reg: ";
-//    for(int i=0;i<=31;++i) std::cout<<reg[i]<<" ";
-//    std::cout<<std::endl;
 }
 
 #endif //RISIC_V_TOMASULO_H
